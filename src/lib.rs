@@ -1,5 +1,17 @@
+//! Simple crate for logging messages both in debug and/or release builds.
+//!
+//! Currently, 3 log targets are supported:
+//! - Console => Coloured formatted output on the console.
+//! - File => Formatted text file, currently fixed to "log.txt" in the executable's folder.
+//! - Network => Send the log message on the network so that it can be processed somewhere else.
+//!
+//! For network logging this crate uses a custom protocol.
+//!
+
 use chrono::{DateTime, Local};
 use crossbeam::channel::{bounded, Sender};
+use std::fs::File;
+use std::io::{LineWriter, Write};
 use std::thread;
 
 /// Maximum number of log messages that can be queued.
@@ -21,15 +33,17 @@ pub enum Level {
 }
 
 /// Available log destinations.
+/// Note that file logging is notably slower than the other options.
 pub enum Target {
     /// Log to the console.
     Console,
-    /// Log to a file.
+    /// Log to a file (by default "log.txt" in the executable's folder).
     File,
     /// Log to the network using a custom packet format.
     Network,
 }
 
+/// Supported variable types for a T2 message.
 pub enum SupportedTypes {
     U8(u8),
     U16(u16),
@@ -79,11 +93,13 @@ impl Logger {
         // Spawn the thread that will process all messages.
         let _thread = match target {
             Target::Console => thread::spawn(move || loop {
+                // Receive the next log message.
                 let message = match receiver.recv() {
                     Ok(x) => x,
                     Err(_) => return,
                 };
 
+                // Print the received message to console.
                 if message.level >= level {
                     match message.level {
                         Level::Trace => {
@@ -139,8 +155,37 @@ impl Logger {
                     }
                 }
             }),
-            Target::File => thread::spawn(|| {}),
-            Target::Network => thread::spawn(|| {}),
+            Target::File => thread::spawn(move || {
+                // Initialise the log file (at the moment, the actual file path is fixed).
+                let log_file = File::create("log.txt").expect("Failed to create log file.");
+                let mut log_writer = LineWriter::new(log_file);
+
+                // Main logger loop.
+                loop {
+                    // Receive the next log message.
+                    let message = match receiver.recv() {
+                        Ok(x) => x,
+                        Err(_) => return,
+                    };
+
+                    // Write the received message to file.
+                    if message.level >= level {
+                        match writeln!(
+                            log_writer,
+                            "[{}] - <{}> ({}({})) {}",
+                            message.level as u8,
+                            message.timestamp.format("%Y-%m-%d|%H:%M:%S.%f"),
+                            message.file,
+                            message.line,
+                            message.text
+                        ) {
+                            Ok(_) => (),
+                            Err(_) => return,
+                        };
+                    }
+                }
+            }),
+            Target::Network => todo!(),
         };
 
         Logger {
@@ -427,18 +472,4 @@ macro_rules! err {
 #[macro_export]
 macro_rules! fatal {
     ($($arg:tt)*) => {};
-}
-
-/// Base logging function.
-/// Requires a logger, the logging level and an already formatted string slice.
-pub fn message_base(logger: &Logger, lvl: Level, msg: &str) {
-    if lvl >= logger.level() {
-        match lvl {
-            Level::Trace => println!("\x1B[0m{msg}\x1B[0m"),
-            Level::Information => println!("\x1B[32m{msg}\x1B[0m"),
-            Level::Warning => println!("\x1B[33m{msg}\x1B[0m"),
-            Level::Error => println!("\x1B[31m{msg}\x1B[0m"),
-            Level::Fatal => println!("\x1B[35m{msg}\x1B[0m"),
-        }
-    }
 }
