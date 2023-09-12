@@ -2,38 +2,29 @@
 //!
 //! Currently, 3 log targets are supported:
 //! - Console => Coloured formatted output on the console.
-//! - File => Formatted text file, currently fixed to "log.txt" in the executable's folder.
+//! - File => Formatted text file.
 //! - Network => Send the log message on the network so that it can be processed somewhere else.
 //!
 //! For network logging this crate uses a custom protocol.
-//!
 
-use chrono::{DateTime, Local};
+mod protocol;
+
+pub use crate::protocol::Level;
+pub use crate::protocol::Message;
+
 use crossbeam::channel::{bounded, Sender};
 use std::fs::File;
 use std::io::{LineWriter, Write};
+use std::net::{SocketAddr, UdpSocket};
+use std::str::FromStr;
 use std::thread;
 
 /// Maximum number of log messages that can be queued.
 pub const MESSAGE_BUFFER_SIZE: usize = 1024;
 
-/// Available log levels, in increasing priority.
-#[derive(PartialEq, PartialOrd, Clone, Copy)]
-pub enum Level {
-    /// Log all messages with Trace priority or higher.
-    Trace,
-    /// Log all messages with Information priority or higher.
-    Information,
-    /// Log all messages with Warning priority or higher.
-    Warning,
-    /// Log all messages with Error priority or higher.
-    Error,
-    /// Log all messages with Fatal priority or higher.
-    Fatal,
-}
-
 /// Available log destinations.
 /// Note that file logging is notably slower than the other options.
+#[derive(Clone, Copy)]
 pub enum Target {
     /// Log to the console.
     Console,
@@ -43,160 +34,175 @@ pub enum Target {
     Network,
 }
 
-/// Supported variable types for a T2 message.
-pub enum SupportedTypes {
-    U8(u8),
-    U16(u16),
-    U32(u32),
-    U64(u64),
-    I8(i8),
-    I16(i16),
-    I32(i32),
-    I64(i64),
-    F32(f32),
-    F64(f64),
-}
-
-/// Internal structure that holds all information for a single log message.
-pub struct Message {
-    /// Raw timestamp value.
-    pub timestamp: DateTime<Local>,
-    /// Priority of the message.
-    pub level: Level,
-    /// Formatted text associated with the message.
-    pub text: String,
-    /// Optional value associated with the message.
-    pub value: Option<SupportedTypes>,
-    /// File where the message originated.
-    pub file: String,
-    /// Line where the message originated.
-    pub line: u32,
+/// Settings for a network logger.
+pub struct NetworkSettings {
+    pub local_socket: String,
+    pub destination_socket: String,
 }
 
 /// Contains the state of a logger.
 #[derive(Clone)]
 pub struct Logger {
     level: Level,
+    target: Target,
     pub channel: Sender<Message>,
 }
 
 impl Logger {
-    /// Get the current logging level of the logger.
+    /// Get the current logging level.
     pub fn level(&self) -> Level {
         self.level
     }
 
-    /// Create a new logger with specific values.
-    pub fn new(level: Level, target: Target) -> Logger {
+    /// Get the current log target.
+    pub fn target(&self) -> Target {
+        self.target
+    }
+
+    /// Create a new logger that targets the console.
+    pub fn to_console(level: Level) -> Logger {
         let (sender, receiver) = bounded::<Message>(MESSAGE_BUFFER_SIZE);
 
         // Spawn the thread that will process all messages.
-        let _thread = match target {
-            Target::Console => thread::spawn(move || loop {
-                // Receive the next log message.
-                let message = match receiver.recv() {
-                    Ok(x) => x,
-                    Err(_) => return,
-                };
+        let _thread = thread::spawn(move || loop {
+            // Receive the next log message.
+            let message = match receiver.recv() {
+                Ok(x) => x,
+                Err(_) => return,
+            };
 
-                // Print the received message to console.
-                if message.level >= level {
-                    match message.level {
-                        Level::Trace => {
-                            println!(
-                                "\x1B[0m[{}] - <{}> ({}({})) {}\x1B[0m",
-                                message.level as u8,
-                                message.timestamp.format("%Y-%m-%d|%H:%M:%S.%f"),
-                                message.file,
-                                message.line,
-                                message.text
-                            )
-                        }
-                        Level::Information => {
-                            println!(
-                                "\x1B[32m[{}] - <{}> ({}({})) {}\x1B[0m",
-                                message.level as u8,
-                                message.timestamp.format("%Y-%m-%d|%H:%M:%S.%f"),
-                                message.file,
-                                message.line,
-                                message.text
-                            )
-                        }
-                        Level::Warning => {
-                            println!(
-                                "\x1B[33m[{}] - <{}> ({}({})) {}\x1B[0m",
-                                message.level as u8,
-                                message.timestamp.format("%Y-%m-%d|%H:%M:%S.%f"),
-                                message.file,
-                                message.line,
-                                message.text
-                            )
-                        }
-                        Level::Error => {
-                            println!(
-                                "\x1B[31m[{}] - <{}> ({}({})) {}\x1B[0m",
-                                message.level as u8,
-                                message.timestamp.format("%Y-%m-%d|%H:%M:%S.%f"),
-                                message.file,
-                                message.line,
-                                message.text
-                            )
-                        }
-                        Level::Fatal => {
-                            println!(
-                                "\x1B[35m[{}] - <{}> ({}({})) {}\x1B[0m",
-                                message.level as u8,
-                                message.timestamp.format("%Y-%m-%d|%H:%M:%S.%f"),
-                                message.file,
-                                message.line,
-                                message.text
-                            )
-                        }
-                    }
-                }
-            }),
-            Target::File => thread::spawn(move || {
-                // Initialise the log file (at the moment, the actual file path is fixed).
-                let log_file = File::create("log.txt").expect("Failed to create log file.");
-                let mut log_writer = LineWriter::new(log_file);
-
-                // Main logger loop.
-                loop {
-                    // Receive the next log message.
-                    let message = match receiver.recv() {
-                        Ok(x) => x,
-                        Err(_) => return,
-                    };
-
-                    // Write the received message to file.
-                    if message.level >= level {
-                        match writeln!(
-                            log_writer,
-                            "[{}] - <{}> ({}({})) {}",
+            // Print the received message to console.
+            if message.level >= level {
+                match message.level {
+                    Level::Trace => {
+                        println!(
+                            "\x1B[0m[{}] - <{}> ({}({})) {}\x1B[0m",
                             message.level as u8,
                             message.timestamp.format("%Y-%m-%d|%H:%M:%S.%f"),
                             message.file,
                             message.line,
                             message.text
-                        ) {
-                            Ok(_) => (),
-                            Err(_) => return,
-                        };
+                        )
+                    }
+                    Level::Information => {
+                        println!(
+                            "\x1B[32m[{}] - <{}> ({}({})) {}\x1B[0m",
+                            message.level as u8,
+                            message.timestamp.format("%Y-%m-%d|%H:%M:%S.%f"),
+                            message.file,
+                            message.line,
+                            message.text
+                        )
+                    }
+                    Level::Warning => {
+                        println!(
+                            "\x1B[33m[{}] - <{}> ({}({})) {}\x1B[0m",
+                            message.level as u8,
+                            message.timestamp.format("%Y-%m-%d|%H:%M:%S.%f"),
+                            message.file,
+                            message.line,
+                            message.text
+                        )
+                    }
+                    Level::Error => {
+                        println!(
+                            "\x1B[31m[{}] - <{}> ({}({})) {}\x1B[0m",
+                            message.level as u8,
+                            message.timestamp.format("%Y-%m-%d|%H:%M:%S.%f"),
+                            message.file,
+                            message.line,
+                            message.text
+                        )
+                    }
+                    Level::Fatal => {
+                        println!(
+                            "\x1B[35m[{}] - <{}> ({}({})) {}\x1B[0m",
+                            message.level as u8,
+                            message.timestamp.format("%Y-%m-%d|%H:%M:%S.%f"),
+                            message.file,
+                            message.line,
+                            message.text
+                        )
                     }
                 }
-            }),
-            Target::Network => todo!(),
-        };
+            }
+        });
 
         Logger {
             level,
+            target: Target::Console,
             channel: sender,
         }
     }
 
-    /// Set the logging level of the logger.
-    pub fn set_level(&mut self, new_level: Level) {
-        self.level = new_level;
+    /// Create a new logger that targets a file.
+    pub fn to_file(level: Level, path: &str) -> Logger {
+        let (sender, receiver) = bounded::<Message>(MESSAGE_BUFFER_SIZE);
+
+        // Initialise the log file (at the moment, the actual file path is fixed).
+        let log_file = File::create(path).expect("Failed to create log file.");
+        let mut log_writer = LineWriter::new(log_file);
+
+        let _thread = thread::spawn(move || loop {
+            // Receive the next log message.
+            let message = match receiver.recv() {
+                Ok(x) => x,
+                Err(_) => return,
+            };
+
+            // Write the received message to file.
+            if message.level >= level {
+                match writeln!(
+                    log_writer,
+                    "[{}] - <{}> ({}({})) {}",
+                    message.level as u8,
+                    message.timestamp.format("%Y-%m-%d|%H:%M:%S.%f"),
+                    message.file,
+                    message.line,
+                    message.text
+                ) {
+                    Ok(_) => (),
+                    Err(_) => return,
+                };
+            }
+        });
+
+        Logger {
+            level,
+            target: Target::File,
+            channel: sender,
+        }
+    }
+
+    /// Create a new logger that targets a network socket.
+    pub fn to_network(level: Level, settings: &NetworkSettings) -> Logger {
+        let (sender, receiver) = bounded::<Message>(MESSAGE_BUFFER_SIZE);
+
+        // Initialise the socket.
+        let socket =
+            UdpSocket::bind(&settings.local_socket).expect("Failed to bind local logging socket.");
+        let destination = SocketAddr::from_str(&settings.destination_socket)
+            .expect("Failed to parse log destination address.");
+
+        let _thread = thread::spawn(move || loop {
+            // Receive the next log message.
+            let message = match receiver.recv() {
+                Ok(x) => x,
+                Err(_) => return,
+            };
+
+            // Write the received message to file.
+            if message.level >= level {
+                protocol::send_message_v1(&socket, &destination, &message)
+                    .expect("Failed to send log message to the network.");
+            }
+        });
+
+        Logger {
+            level,
+            target: Target::Network,
+            channel: sender,
+        }
     }
 }
 
