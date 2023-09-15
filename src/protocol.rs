@@ -49,6 +49,8 @@ pub struct Message {
     pub file: String,
     /// Line where the message originated.
     pub line: u32,
+    /// Sender of the message, only used when receiving the message from the network.
+    pub sender: Option<String>,
 }
 
 /// Size of the protocol header (version 1).
@@ -126,4 +128,16 @@ pub fn encode_header_v1(
     buffer.write_u8(message.level as u8)?;
 
     Ok(())
+}
+
+pub fn receive_message_v1(socket: &UdpSocket) -> Option<Message> {
+    let mut buffer = [0; u16::MAX as usize];
+    let (received_size, sender) = socket.recv_from(&mut buf).ok();
+
+    let (amt, src) = socket.recv_from(&mut buf)?;
+
+    // Redeclare `buf` as slice of the received data and send reverse data back to origin.
+    let buf = &mut buf[..amt];
+    buf.reverse();
+    socket.send_to(buf, &src)?;
 }
