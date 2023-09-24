@@ -185,7 +185,7 @@ pub fn receive_message_v1(socket: &UdpSocket) -> Option<Message> {
     let decoded_header = decode_header_v1(&buffer[0..received_size])?;
     if decoded_header.protocol_version != 1
         || decoded_header.message_count == 0
-        || Level::try_from(decoded_header.level).is_ok()
+        || Level::try_from(decoded_header.level).is_err()
     {
         return None;
     }
@@ -194,25 +194,38 @@ pub fn receive_message_v1(socket: &UdpSocket) -> Option<Message> {
         // T2 message
         2 => todo!(),
         // T1 message
-        1 => Some(Message {
-            timestamp: chrono::Local
-                .with_ymd_and_hms(
-                    decoded_header.timestamp_year as i32,
-                    decoded_header.timestamp_month as u32,
-                    decoded_header.timestamp_day as u32,
-                    decoded_header.timestamp_hour as u32,
-                    decoded_header.timestamp_minute as u32,
-                    decoded_header.timestamp_second as u32,
-                )
-                .earliest()?
-                .with_nanosecond(decoded_header.timestamp_nanosecond)?,
-            level: decoded_header.level.try_into().ok()?,
-            text: "".to_string(),
-            value: None,
-            file: decoded_header.file,
-            line: decoded_header.line,
-            sender: Some(sender.to_string()),
-        }),
+        1 => {
+            let mut result = Message {
+                timestamp: chrono::Local
+                    .with_ymd_and_hms(
+                        decoded_header.timestamp_year as i32,
+                        decoded_header.timestamp_month as u32,
+                        decoded_header.timestamp_day as u32,
+                        decoded_header.timestamp_hour as u32,
+                        decoded_header.timestamp_minute as u32,
+                        decoded_header.timestamp_second as u32,
+                    )
+                    .earliest()?
+                    .with_nanosecond(decoded_header.timestamp_nanosecond)?,
+                level: decoded_header.level.try_into().ok()?,
+                text: "".to_string(),
+                value: None,
+                file: decoded_header.file,
+                line: decoded_header.line,
+                sender: Some(sender.to_string()),
+            };
+
+            let mut payload = &buffer[HEADER_LEN_V1 + result.file.len()..];
+            let text_len = payload.read_u16::<NetworkEndian>().ok()?;
+
+            if payload.len() >= text_len as usize {
+                if let Ok(x) = String::from_utf8(payload[..text_len as usize].to_vec()) {
+                    result.text = x;
+                }
+            }
+
+            Some(result)
+        }
         _ => None,
     }
 }
