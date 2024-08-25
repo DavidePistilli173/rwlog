@@ -16,7 +16,7 @@ pub const MESSAGE_BUFFER_SIZE: usize = 1024;
 
 /// Available log destinations.
 /// Note that file logging is notably slower than the other options.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Target {
     /// Log to the console.
     Console,
@@ -33,7 +33,7 @@ pub struct NetworkSettings {
 }
 
 /// Contains the state of a logger.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Logger {
     level: Level,
     target: Target,
@@ -208,10 +208,10 @@ impl Logger {
 /// let logger = Logger::to_console(Level::Trace);
 /// let a = 5;
 /// let b = 4;
-/// rwlog::rel_trace!(&logger, "Variable a is {a} and b is {}.", b);
+/// rwlog::trace!(&logger, "Variable a is {a} and b is {}.", b);
 /// ```
 #[macro_export]
-macro_rules! rel_trace {
+macro_rules! trace {
     ($logger:expr, $($arg:tt)*) => {
         let msg = format!($($arg)*);
 
@@ -239,10 +239,10 @@ macro_rules! rel_trace {
 /// let logger = Logger::to_console(Level::Information);
 /// let a = 5;
 /// let b = 4;
-/// rwlog::rel_info!(&logger, "Variable a is {a} and b is {}.", b);
+/// rwlog::info!(&logger, "Variable a is {a} and b is {}.", b);
 /// ```
 #[macro_export]
-macro_rules! rel_info {
+macro_rules! info {
     ($logger:expr, $($arg:tt)*) => {
         let msg = format!($($arg)*);
 
@@ -270,10 +270,10 @@ macro_rules! rel_info {
 /// let logger = Logger::to_console(Level::Warning);
 /// let a = 5;
 /// let b = 4;
-/// rwlog::rel_warn!(&logger, "Variable a is {a} and b is {}.", b);
+/// rwlog::warn!(&logger, "Variable a is {a} and b is {}.", b);
 /// ```
 #[macro_export]
-macro_rules! rel_warn {
+macro_rules! warn {
     ($logger:expr, $($arg:tt)*) => {
         let msg = format!($($arg)*);
 
@@ -301,10 +301,10 @@ macro_rules! rel_warn {
 /// let logger = Logger::to_console(Level::Error);
 /// let a = 5;
 /// let b = 4;
-/// rwlog::rel_err!(&logger, "Variable a is {a} and b is {}.", b);
+/// rwlog::err!(&logger, "Variable a is {a} and b is {}.", b);
 /// ```
 #[macro_export]
-macro_rules! rel_err {
+macro_rules! err {
     ($logger:expr, $($arg:tt)*) => {
         let msg = format!($($arg)*);
 
@@ -323,9 +323,8 @@ macro_rules! rel_err {
 }
 
 /// Log a fatal message in both debug and release builds.
-/// This panics the program.
 /// # Example
-/// ```should_panic
+/// ```
 /// use rwlog::sender::Logger;
 /// use rwlog::Level;
 /// use rwlog::sender::Target;
@@ -333,10 +332,10 @@ macro_rules! rel_err {
 /// let logger = Logger::to_console(Level::Fatal);
 /// let a = 5;
 /// let b = 4;
-/// rwlog::rel_fatal!(&logger, "Variable a is {a} and b is {}.", b);
+/// rwlog::fatal!(&logger, "Variable a is {a} and b is {}.", b);
 /// ```
 #[macro_export]
-macro_rules! rel_fatal {
+macro_rules! fatal {
     ($logger:expr, $($arg:tt)*) => {
         let msg = format!($($arg)*);
 
@@ -351,128 +350,5 @@ macro_rules! rel_fatal {
         };
 
         $logger.channel.send(msg).expect("Logger thread unreachable.");
-        std::thread::sleep(std::time::Duration::from_millis(1000));
-        std::process::exit(1);
     };
-}
-
-/// Log a trace message only in debug builds.
-/// # Example
-/// ```
-/// use rwlog::sender::Logger;
-/// use rwlog::Level;
-/// use rwlog::sender::Target;
-///
-/// let logger = Logger::to_console(Level::Trace);
-/// let a = 5;
-/// let b = 4;
-/// rwlog::trace!(&logger, "Variable a is {a} and b is {}.", b);
-/// ```
-#[cfg(debug_assertions)]
-#[macro_export]
-macro_rules! trace {
-    ($logger:expr, $($arg:tt)*) =>{ $crate::rel_trace!($logger, $($arg)*); };
-}
-
-/// Log an information message only in debug builds.
-/// # Example
-/// ```
-/// use rwlog::sender::Logger;
-/// use rwlog::Level;
-/// use rwlog::sender::Target;
-///
-/// let logger = Logger::to_console(Level::Information);
-/// let a = 5;
-/// let b = 4;
-/// rwlog::info!(&logger, "Variable a is {a} and b is {}.", b);
-/// ```
-#[cfg(debug_assertions)]
-#[macro_export]
-macro_rules! info {
-    ($logger:expr, $($arg:tt)*) => { $crate::rel_info!($logger, $($arg)*); };
-}
-
-/// Log a warning message only in debug builds.
-/// # Example
-/// ```
-/// use rwlog::sender::Logger;
-/// use rwlog::Level;
-/// use rwlog::sender::Target;
-///
-/// let logger = Logger::to_console(Level::Warning);
-/// let a = 5;
-/// let b = 4;
-/// rwlog::warn!(&logger, "Variable a is {a} and b is {}.", b);
-/// ```
-#[cfg(debug_assertions)]
-#[macro_export]
-macro_rules! warn {
-    ($logger:expr, $($arg:tt)*) => { $crate::rel_warn!($logger, $($arg)*); };
-}
-
-/// Log an error message only in debug builds.
-/// # Example
-/// ```
-/// use rwlog::sender::Logger;
-/// use rwlog::Level;
-/// use rwlog::sender::Target;
-///
-/// let logger = Logger::to_console(Level::Error);
-/// let a = 5;
-/// let b = 4;
-/// rwlog::err!(&logger, "Variable a is {a} and b is {}.", b);
-/// ```
-#[cfg(debug_assertions)]
-#[macro_export]
-macro_rules! err {
-    ($logger:expr, $($arg:tt)*) => { $crate::rel_err!($logger, $($arg)*); };
-}
-
-/// Log a fatal message only in debug builds.
-/// This panics the program.
-/// # Example
-/// ```should_panic
-/// use rwlog::sender::Logger;
-/// use rwlog::Level;
-/// use rwlog::sender::Target;
-///
-/// let logger = Logger::to_console(Level::Fatal);
-/// let a = 5;
-/// let b = 4;
-/// rwlog::fatal!(&logger, "Variable a is {a} and b is {}.", b);
-/// ```
-#[cfg(debug_assertions)]
-#[macro_export]
-macro_rules! fatal {
-    ($logger:expr, $($arg:tt)*) => { $crate::rel_fatal!($logger, $($arg)*); };
-}
-
-#[cfg(not(debug_assertions))]
-#[macro_export]
-macro_rules! trace {
-    ($($arg:tt)*) => {};
-}
-
-#[cfg(not(debug_assertions))]
-#[macro_export]
-macro_rules! info {
-    ($($arg:tt)*) => {};
-}
-
-#[cfg(not(debug_assertions))]
-#[macro_export]
-macro_rules! warn {
-    ($($arg:tt)*) => {};
-}
-
-#[cfg(not(debug_assertions))]
-#[macro_export]
-macro_rules! err {
-    ($($arg:tt)*) => {};
-}
-
-#[cfg(not(debug_assertions))]
-#[macro_export]
-macro_rules! fatal {
-    ($($arg:tt)*) => {};
 }
